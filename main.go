@@ -43,6 +43,25 @@ func initDB() {
 	}
 }
 
+// 自訂 API Token 檢查中間件 (類似 OkHttp Interceptor)
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.GetHeader("X-API-Token")
+
+		// 檢查 Header 是否帶有正確的 Token
+		if token != "secret123" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"status":  "error",
+				"message": "Unauthorized: Invalid or missing API Token",
+			})
+			c.Abort() // 攔截請求，不繼續往下執行
+			return
+		}
+
+		c.Next() // 驗證通過，繼續執行後續 Handler
+	}
+}
+
 // 模擬背景耗時任務 (用 Goroutine 執行)
 func logAnalytics(action string) {
 	go func() {
@@ -86,8 +105,8 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "success", "data": job})
 	})
 
-	// 3. POST 請求：新增筆職缺寫入 DB
-	r.POST("/api/v1/jobs", func(c *gin.Context) {
+	// 3. POST 請求：新增筆職缺寫入 DB (加上 AuthMiddleware 權限保護)
+	r.POST("/api/v1/jobs", AuthMiddleware(), func(c *gin.Context) {
 		var newJob JobOpportunity
 		if err := c.ShouldBindJSON(&newJob); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": err.Error()})
