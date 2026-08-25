@@ -1,61 +1,104 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-// 定義職缺資料模型
+// 定義職缺資料模型 (嵌入 gorm.Model，自動產生 ID, CreatedAt, UpdatedAt, DeletedAt)
 type JobOpportunity struct {
-	ID       string `json:"id"`
+	gorm.Model
 	Company  string `json:"company"`
 	Title    string `json:"title"`
-	Location string `json:"location"` // 例如: "Taiwan" 或 "Japan"
+	Location string `json:"location"`
 }
 
-// 模擬記憶體資料庫
-var jobs = []JobOpportunity{
-	{ID: "1", Company: "Mercari Japan", Title: "Senior Go/Mobile Engineer", Location: "Japan"},
-	{ID: "2", Company: "Tech Corp TW", Title: "Senior Android Engineer", Location: "Taiwan"},
+// 資料庫全域變數
+var db *gorm.DB
+
+// 初始化資料庫與預設資料
+func initDB() {
+	var err error
+	// 自動建立 jobs.db 檔案
+	db, err = gorm.Open(sqlite.Open("jobs.db"), &gorm.Config{})
+	if err != nil {
+		panic("Failed to connect to database!")
+	}
+
+	// 自動建立資料表 Schema
+	db.AutoMigrate(&JobOpportunity{})
+
+	// 若資料庫內無資料，寫入預設測試資料
+	var count int64
+	db.Model(&JobOpportunity{}).Count(&count)
+	if count == 0 {
+		db.Create(&JobOpportunity{Company: "Mercari Japan", Title: "Senior Go/Mobile Engineer", Location: "Japan"})
+		db.Create(&JobOpportunity{Company: "Tech Corp TW", Title: "Senior Android Engineer", Location: "Taiwan"})
+		fmt.Println("🎉 Initial database seeded successfully!")
+	}
+}
+
+// 模擬背景耗時任務 (用 Goroutine 執行)
+func logAnalytics(action string) {
+	go func() {
+		time.Sleep(100 * time.Millisecond) // 模擬非同步寫入 Log
+		fmt.Printf("⚡ [Goroutine Background Log] Action recorded: %s at %s\n", action, time.Now().Format("15:04:05"))
+	}()
 }
 
 func main() {
-	// 初始化 Gin 引擎 (自帶 Logger 與 Recovery 中間件)
+	// 1. 啟動時初始化 DB (👉 新增這行)
+	initDB()
+
+	// 初始化 Gin 引擎
 	r := gin.Default()
 
-	// 1. GET 請求：取得所有職缺清單
+	// 1. GET 請求：從 DB 取得所有職缺
 	r.GET("/api/v1/jobs", func(c *gin.Context) {
+		logAnalytics("Fetch All Jobs")
+
+		var jobList []JobOpportunity
+		db.Find(&jobList) // 👈 從資料庫 SELECT 所有資料
+
 		c.JSON(http.StatusOK, gin.H{
 			"status": "success",
-			"data":   jobs,
+			"data":   jobList,
 		})
 	})
 
-	// 2. GET 請求：透過 URL 參數 (Path variable) 查詢單一職缺
+	// 2. GET 請求：透過 ID 從 DB 查詢單一職缺
 	r.GET("/api/v1/jobs/:id", func(c *gin.Context) {
 		id := c.Param("id")
-		for _, job := range jobs {
-			if job.ID == id {
-				c.JSON(http.StatusOK, gin.H{"status": "success", "data": job})
-				return
-			}
+		logAnalytics("Fetch Job ID: " + id)
+
+		var job JobOpportunity
+		// 👈 用 GORM 直接向資料庫查詢 ID
+		if err := db.First(&job, id).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "Job not found"})
+			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "Job not found"})
+
+		c.JSON(http.StatusOK, gin.H{"status": "success", "data": job})
 	})
 
-	// 3. POST 請求：新增筆職缺 (測試 JSON binding)
+	// 3. POST 請求：新增筆職缺寫入 DB
 	r.POST("/api/v1/jobs", func(c *gin.Context) {
 		var newJob JobOpportunity
-		// 自動將 Request Body 的 JSON 綁定至 Struct
 		if err := c.ShouldBindJSON(&newJob); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"status": "error", "message": err.Error()})
 			return
 		}
-		jobs = append(jobs, newJob)
+
+		db.Create(&newJob) // 👈 寫入資料庫 INSERT
+
+		logAnalytics("Create New Job: " + newJob.Company)
 		c.JSON(http.StatusCreated, gin.H{"status": "success", "data": newJob})
 	})
 
-	// 啟動伺服器，預設監聽 8080 埠
 	r.Run(":8080")
 }
