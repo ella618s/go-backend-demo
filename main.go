@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres" 
 	"gorm.io/gorm"
 )
 
@@ -23,14 +24,38 @@ var db *gorm.DB
 
 // 初始化資料庫與預設資料
 func initDB() {
-	var err error
-	// 自動建立 jobs.db 檔案
-	db, err = gorm.Open(sqlite.Open("jobs.db"), &gorm.Config{})
-	if err != nil {
-		panic("Failed to connect to database!")
+	// 從環境變數讀取，若無則使用本機預設值
+	host := os.Getenv("DB_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+	user := os.Getenv("DB_USER")
+	if user == "" {
+		user = "user"
+	}
+	password := os.Getenv("DB_PASSWORD")
+	if password == "" {
+		password = "password"
+	}
+	dbname := os.Getenv("DB_NAME")
+	if dbname == "" {
+		dbname = "jobdb"
+	}
+	port := os.Getenv("DB_PORT")
+	if port == "" {
+		port = "5432"
 	}
 
-	// 自動建立資料表 Schema
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Taipei",
+		host, user, password, dbname, port)
+
+	var err error
+	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	if err != nil {
+		panic("Failed to connect to PostgreSQL database!")
+	}
+
+	// 自動遷移 Schema
 	db.AutoMigrate(&JobOpportunity{})
 
 	// 若資料庫內無資料，寫入預設測試資料
@@ -39,7 +64,7 @@ func initDB() {
 	if count == 0 {
 		db.Create(&JobOpportunity{Company: "Mercari Japan", Title: "Senior Go/Mobile Engineer", Location: "Japan"})
 		db.Create(&JobOpportunity{Company: "Tech Corp TW", Title: "Senior Android Engineer", Location: "Taiwan"})
-		fmt.Println("🎉 Initial database seeded successfully!")
+		fmt.Println("🎉 PostgreSQL database seeded successfully!")
 	}
 }
 

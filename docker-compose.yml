@@ -1,0 +1,37 @@
+# 一鍵啟動 Go + PostgreSQL
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: demo_postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: jobdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d jobdb"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    container_name: demo_go_app
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: postgres
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: jobdb
+      DB_PORT: 5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
