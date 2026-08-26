@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -103,11 +104,8 @@ func logAnalytics(action string) {
 	}()
 }
 
-func main() {
-	// 1. 啟動時初始化 DB (👉 新增這行)
-	initDB()
-
-	// 初始化 Gin 引擎
+// 將建立路由的邏輯抽離出來，供 main() 與測試檔 (main_test.go) 共用
+func setupRouter() *gin.Engine {
 	r := gin.Default()
 
 	// 1. GET 請求：從 DB 取得所有職缺
@@ -115,7 +113,7 @@ func main() {
 		logAnalytics("Fetch All Jobs")
 
 		var jobList []JobOpportunity
-		db.Find(&jobList) // 👈 從資料庫 SELECT 所有資料
+		db.Find(&jobList)
 
 		c.JSON(http.StatusOK, gin.H{
 			"status": "success",
@@ -129,7 +127,6 @@ func main() {
 		logAnalytics("Fetch Job ID: " + id)
 
 		var job JobOpportunity
-		// 👈 用 GORM 直接向資料庫查詢 ID
 		if err := db.First(&job, id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"status": "error", "message": "Job not found"})
 			return
@@ -138,7 +135,7 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "success", "data": job})
 	})
 
-	// 3. POST 請求：新增筆職缺寫入 DB (加上 AuthMiddleware 權限保護)
+	// 3. POST 請求：新增職缺寫入 DB (加上 AuthMiddleware 權限保護)
 	r.POST("/api/v1/jobs", AuthMiddleware(), func(c *gin.Context) {
 		var newJob JobOpportunity
 		if err := c.ShouldBindJSON(&newJob); err != nil {
@@ -146,11 +143,22 @@ func main() {
 			return
 		}
 
-		db.Create(&newJob) // 👈 寫入資料庫 INSERT
+		db.Create(&newJob)
 
 		logAnalytics("Create New Job: " + newJob.Company)
 		c.JSON(http.StatusCreated, gin.H{"status": "success", "data": newJob})
 	})
 
-	r.Run(":8080")
+	return r
+}
+
+func main() {
+	// 啟動時初始化 DB
+	initDB()
+
+	// 取得路由引擎並啟動服務
+	r := setupRouter()
+	if err := r.Run(":8080"); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
 }
