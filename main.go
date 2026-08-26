@@ -76,6 +76,25 @@ func initDB() {
 	}
 }
 
+// 自訂 API Token 檢查中間件
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.GetHeader("X-API-Token")
+
+		// 檢查 Header 是否帶有正確的 Token
+		if token != "secret123" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"status":  "error",
+				"message": "Unauthorized: Invalid or missing API Token",
+			})
+			c.Abort() // 攔截請求，不繼續往下執行
+			return
+		}
+
+		c.Next() // 驗證通過，繼續執行後續 Handler
+	}
+}
+
 // 模擬背景耗時任務 (用 Goroutine 執行)
 func logAnalytics(action string) {
 	go func() {
