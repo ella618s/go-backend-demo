@@ -23,18 +23,22 @@ type JobOpportunity struct {
 	Location string `json:"location"`
 }
 
-// 修正後的 C-B0024-001 JSON 結構解析
+// 對齊截圖中的完整 JSON 結構
 type CwaObsResponse struct {
-	Success string `json:"success"`
 	Records struct {
-		Station []struct {
-			StationName string `json:"StationName"`
-			StationId   string `json:"StationId"`
-			WeatherElement struct {
-				AirTemperature string `json:"AirTemperature"`
-				WindSpeed      string `json:"WindSpeed"`
-			} `json:"WeatherElement"`
-		} `json:"Station"`
+		Location []struct {
+			Station struct {
+				StationID   string `json:"StationID"`
+				StationName string `json:"StationName"`
+			} `json:"station"`
+			StationObsTimes struct {
+				StationObsTime []struct {
+					WeatherElements struct {
+						WindSpeed string `json:"WindSpeed"`
+					} `json:"weatherElements"`
+				} `json:"stationObsTime"`
+			} `json:"stationObsTimes"`
+		} `json:"location"`
 	} `json:"records"`
 }
 
@@ -75,28 +79,32 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 	}
 
 	var results []gin.H
-	stations := cwaRes.Records.Station
+	locations := cwaRes.Records.Location
 
-	if len(stations) > 0 {
+	if len(locations) > 0 {
 		limit := 5
-		if len(stations) < limit {
-			limit = len(stations)
+		if len(locations) < limit {
+			limit = len(locations)
 		}
 
 		for i := 0; i < limit; i++ {
-			st := stations[i]
+			loc := locations[i]
 			
-			// 取得氣溫與風速資料，若為空則給預設值
-			wind := st.WeatherElement.WindSpeed
-			if wind == "" || wind == "-99" {
-				wind = "12"
+			// 抓取風速（從最新一筆時間紀錄中取出）
+			wind := "12"
+			obsTimes := loc.StationObsTimes.StationObsTime
+			if len(obsTimes) > 0 {
+				w := obsTimes[0].WeatherElements.WindSpeed
+				if w != "" && w != "-99" {
+					wind = w
+				}
 			}
 
 			results = append(results, gin.H{
-				"location_name":  st.StationName,
-				"wave_height_m":  "1.2", // 近岸預估浪高
+				"location_name":  loc.Station.StationName,
+				"wave_height_m":  "1.2",
 				"wind_speed_kts": wind,
-				"tide_info":      "測站編號: " + st.StationId,
+				"tide_info":      "測站編號: " + loc.Station.StationID,
 				"updated_at":     time.Now().Format("2006-01-02 15:04"),
 			})
 		}
