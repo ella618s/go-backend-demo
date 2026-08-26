@@ -24,30 +24,38 @@ var db *gorm.DB
 
 // 初始化資料庫與預設資料
 func initDB() {
-	// 從環境變數讀取，若無則使用本機預設值
-	host := os.Getenv("DB_HOST")
-	if host == "" {
-		host = "localhost"
-	}
-	user := os.Getenv("DB_USER")
-	if user == "" {
-		user = "user"
-	}
-	password := os.Getenv("DB_PASSWORD")
-	if password == "" {
-		password = "password"
-	}
-	dbname := os.Getenv("DB_NAME")
-	if dbname == "" {
-		dbname = "jobdb"
-	}
-	port := os.Getenv("DB_PORT")
-	if port == "" {
-		port = "5432"
-	}
+	var dsn string
+	dbURL := os.Getenv("DATABASE_URL")
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Taipei",
-		host, user, password, dbname, port)
+	if dbURL != "" {
+		// Render 雲端環境（優先使用平台提供的完整連線字串）
+		dsn = dbURL
+	} else {
+		// 本機 Docker / Homebrew 環境
+		host := os.Getenv("DB_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		user := os.Getenv("DB_USER")
+		if user == "" {
+			user = "user"
+		}
+		password := os.Getenv("DB_PASSWORD")
+		if password == "" {
+			password = "password"
+		}
+		dbname := os.Getenv("DB_NAME")
+		if dbname == "" {
+			dbname = "jobdb"
+		}
+		port := os.Getenv("DB_PORT")
+		if port == "" {
+			port = "5432"
+		}
+
+		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Taipei",
+			host, user, password, dbname, port)
+	}
 
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
@@ -65,25 +73,6 @@ func initDB() {
 		db.Create(&JobOpportunity{Company: "Mercari Japan", Title: "Senior Go/Mobile Engineer", Location: "Japan"})
 		db.Create(&JobOpportunity{Company: "Tech Corp TW", Title: "Senior Android Engineer", Location: "Taiwan"})
 		fmt.Println("🎉 PostgreSQL database seeded successfully!")
-	}
-}
-
-// 自訂 API Token 檢查中間件 (類似 OkHttp Interceptor)
-func AuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		token := c.GetHeader("X-API-Token")
-
-		// 檢查 Header 是否帶有正確的 Token
-		if token != "secret123" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"status":  "error",
-				"message": "Unauthorized: Invalid or missing API Token",
-			})
-			c.Abort() // 攔截請求，不繼續往下執行
-			return
-		}
-
-		c.Next() // 驗證通過，繼續執行後續 Handler
 	}
 }
 
