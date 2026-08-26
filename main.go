@@ -23,25 +23,6 @@ type JobOpportunity struct {
 	Location string `json:"location"`
 }
 
-type CwaObsResponse struct {
-	Success string `json:"success"` // 這裡改為 string
-	Records struct {
-		Location []struct {
-			Station struct {
-				StationID   string `json:"StationID"`
-				StationName string `json:"StationName"`
-			} `json:"station"`
-			StationObsTimes struct {
-				StationObsTime []struct {
-					WeatherElements struct {
-						WindSpeed string `json:"WindSpeed"`
-					} `json:"weatherElements"`
-				} `json:"stationObsTime"`
-			} `json:"stationObsTimes"`
-		} `json:"location"`
-	} `json:"records"`
-}
-
 var db *gorm.DB
 
 func initDB() {
@@ -61,10 +42,8 @@ func initDB() {
 func fetchRealSeaConditions() ([]gin.H, error) {
 	url := fmt.Sprintf("https://opendata.cwa.gov.tw/api/v1/rest/datastore/C-B0024-001?Authorization=%s", CWA_API_KEY)
 
-	// 1. 建立 Request 並模擬瀏覽器 User-Agent 防止被氣象署擋請求
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Printf("❌ 建立 Request 失敗: %v", err)
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
@@ -79,52 +58,79 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("❌ 讀取 Response Body 失敗: %v", err)
 		return nil, err
 	}
 
-	if resp.StatusCode != 200 {
-		log.Printf("❌ 氣象署 API 回傳非 200 狀態碼: %d, 內容: %s", resp.StatusCode, string(body))
-		return nil, fmt.Errorf("CWA API returned status: %d", resp.StatusCode)
-	}
-
-	var cwaRes CwaObsResponse
-	if err := json.Unmarshal(body, &cwaRes); err != nil {
-		log.Printf("❌ JSON 解析失敗: %v", err)
+	// 使用 dynamic map 解析，避免強型態 Struct 失敗
+	var rawData map[string]interface{}
+	if err := json.Unmarshal(body, &rawData); err != nil {
+		log.Printf("❌ Dynamic JSON 解析失敗: %v", err)
 		return nil, err
 	}
 
 	var results []gin.H
-	locations := cwaRes.Records.Location
 
-	if len(locations) > 0 {
-		limit := 20
-		if len(locations) < limit {
-			limit = len(locations)
+	// 層級拆解：records -> location
+	records, ok := rawData["records"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("records field not found or invalid")
+	}
+
+	locations, ok := records["location"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("location list not found or invalid")
+	}
+
+	limit := 20
+	if len(locations) < limit {
+		limit = len(locations)
+	}
+
+	for i := 0; i < limit; i++ {
+		locMap, ok := locations[i].(map[string]interface{})
+		if !ok {
+			continue
 		}
 
-		for i := 0; i < limit; i++ {
-			loc := locations[i]
+		// 安全取得 StationName 與 StationID
+		stationName := "未知測站"
+		stationID := "N/A"
+		if station, ok := locMap["station"].(map[string]interface{}); ok {
+			if name, ok := station["StationName"].(string); ok && name != "" {
+				stationName = name
+			}
+			if id, ok := station["StationID"].(string); ok && id != "" {
+				stationID = id
+			}
+		}
 
-			wind := "12"
-			obsTimes := loc.StationObsTimes.StationObsTime
-			if len(obsTimes) > 0 {
-				w := obsTimes[0].WeatherElements.WindSpeed
-				if w != "" && w != "-99" {
-					wind = w
+		// 安全取得 WindSpeed
+		windSpeed := "1.2"
+		if obsTimesMap, ok := locMap["stationObsTimes"].(map[string]interface{}); ok {
+			if obsTimeList, ok := obsTimesMap["stationObsTime"].([]interface{}); ok && len(obsTimeList) > 0 {
+				if firstObs, ok := obsTimeList[0].(map[string]interface{}); ok {
+					if elements, ok := firstObs["weatherElements"].(map[string]interface{}); ok {
+						if w, ok := elements["WindSpeed"].(string); ok && w != "" && w != "-99" {
+							windSpeed = w
+						} else if wNum, ok := elements["WindSpeed"].(float64); ok {
+							windSpeed = fmt.Sprintf("%.1f", wNum)
+						}
+					}
 				}
 			}
-
-			results = append(results, gin.H{
-				"location_name":  loc.Station.StationName,
-				"wave_height_m":  "1.2",
-				"wind_speed_kts": wind,
-				"tide_info":      "測站編號: " + loc.Station.StationID,
-				"updated_at":     time.Now().Format("2006-01-02 15:04"),
-			})
 		}
-	} else {
-		return nil, fmt.Errorf("locations list is empty")
+
+		results = append(results, gin.H{
+			"location_name":  stationName,
+			"wave_height_m":  "1.2",
+			"wind_speed_kts": windSpeed,
+			"tide_info":      "測站編號: " + stationID,
+			"updated_at":     time.Now().Format("2006-01-02 15:04"),
+		})
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no valid location parsed")
 	}
 
 	return results, nil
@@ -136,7 +142,6 @@ func setupRouter() *gin.Engine {
 	r.GET("/api/v1/sea-conditions", func(c *gin.Context) {
 		seaData, err := fetchRealSeaConditions()
 		if err != nil {
-			// 在 Terminal/Render Console 印出真正的錯誤資訊，方便 debug
 			log.Printf("⚠️ 觸發降級備援模式，原因: %v", err)
 
 			c.JSON(http.StatusOK, gin.H{
