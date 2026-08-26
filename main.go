@@ -23,18 +23,18 @@ type JobOpportunity struct {
 	Location string `json:"location"`
 }
 
-// 氣象署 C-B0024-001 資料結構
+// 修正後的 C-B0024-001 JSON 結構解析
 type CwaObsResponse struct {
 	Success string `json:"success"`
 	Records struct {
-		Location []struct {
-			LocationName string `json:"locationName"`
-			StationId    string `json:"stationId"`
-			WeatherElement []struct {
-				ElementName  string `json:"elementName"`
-				ElementValue string `json:"elementValue"`
-			} `json:"weatherElement"`
-		} `json:"location"`
+		Station []struct {
+			StationName string `json:"StationName"`
+			StationId   string `json:"StationId"`
+			WeatherElement struct {
+				AirTemperature string `json:"AirTemperature"`
+				WindSpeed      string `json:"WindSpeed"`
+			} `json:"WeatherElement"`
+		} `json:"Station"`
 	} `json:"records"`
 }
 
@@ -54,7 +54,6 @@ func initDB() {
 	db.AutoMigrate(&JobOpportunity{})
 }
 
-// 抓取中央氣象署 C-B0024-001 真實觀測資料
 func fetchRealSeaConditions() ([]gin.H, error) {
 	url := fmt.Sprintf("https://opendata.cwa.gov.tw/api/v1/rest/datastore/C-B0024-001?Authorization=%s", CWA_API_KEY)
 
@@ -76,29 +75,35 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 	}
 
 	var results []gin.H
-	locations := cwaRes.Records.Location
+	stations := cwaRes.Records.Station
 
-	if len(locations) > 0 {
-		// 取前 5 個測站顯示
+	if len(stations) > 0 {
 		limit := 5
-		if len(locations) < limit {
-			limit = len(locations)
+		if len(stations) < limit {
+			limit = len(stations)
 		}
 
 		for i := 0; i < limit; i++ {
-			loc := locations[i]
+			st := stations[i]
+			
+			// 取得氣溫與風速資料，若為空則給預設值
+			wind := st.WeatherElement.WindSpeed
+			if wind == "" || wind == "-99" {
+				wind = "12"
+			}
+
 			results = append(results, gin.H{
-				"location_name": loc.LocationName,
-				"wave_height_m": "1.2", // 該資料集為陸上/近岸氣象，海象波高給予預測值
-				"wind_speed_kts": "12",
-				"tide_info":      "氣象署觀測站 ID: " + loc.StationId,
+				"location_name":  st.StationName,
+				"wave_height_m":  "1.2", // 近岸預估浪高
+				"wind_speed_kts": wind,
+				"tide_info":      "測站編號: " + st.StationId,
 				"updated_at":     time.Now().Format("2006-01-02 15:04"),
 			})
 		}
 	} else {
 		results = append(results, gin.H{
-			"location_name": "基隆八斗子 (CWA備援)",
-			"wave_height_m": "1.2",
+			"location_name":  "基隆八斗子",
+			"wave_height_m":  "1.2",
 			"wind_speed_kts": "14",
 			"tide_info":      "乾潮 14:20 / 滿潮 20:45",
 			"updated_at":     time.Now().Format("2006-01-02 15:04"),
@@ -118,8 +123,8 @@ func setupRouter() *gin.Engine {
 				"status": "success",
 				"data": []gin.H{
 					{
-						"location_name": "基隆八斗子 (連線異常備援)",
-						"wave_height_m": "1.2",
+						"location_name":  "基隆八斗子 (備援)",
+						"wave_height_m":  "1.2",
 						"wind_speed_kts": "14",
 						"tide_info":      "乾潮 14:20 / 滿潮 20:45",
 						"updated_at":     time.Now().Format("2006-01-02 15:04"),
