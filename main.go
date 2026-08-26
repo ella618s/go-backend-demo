@@ -24,7 +24,7 @@ type JobOpportunity struct {
 }
 
 type CwaObsResponse struct {
-	Success bool `json:"success"`
+	Success string `json:"success"` // 這裡改為 string
 	Records struct {
 		Location []struct {
 			Station struct {
