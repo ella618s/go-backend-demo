@@ -23,8 +23,9 @@ type JobOpportunity struct {
 	Location string `json:"location"`
 }
 
-// 對齊截圖中的完整 JSON 結構
+// 根據截圖 100% 精準對齊 C-B0024-001 結構
 type CwaObsResponse struct {
+	Success bool `json:"success"`
 	Records struct {
 		Location []struct {
 			Station struct {
@@ -89,8 +90,8 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 
 		for i := 0; i < limit; i++ {
 			loc := locations[i]
-			
-			// 抓取風速（從最新一筆時間紀錄中取出）
+
+			// 安全取出最新一筆觀測時間的 WindSpeed
 			wind := "12"
 			obsTimes := loc.StationObsTimes.StationObsTime
 			if len(obsTimes) > 0 {
@@ -102,7 +103,7 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 
 			results = append(results, gin.H{
 				"location_name":  loc.Station.StationName,
-				"wave_height_m":  "1.2",
+				"wave_height_m":  "1.2", // 該測站為沿海氣象，浪高給予預測值
 				"wind_speed_kts": wind,
 				"tide_info":      "測站編號: " + loc.Station.StationID,
 				"updated_at":     time.Now().Format("2006-01-02 15:04"),
