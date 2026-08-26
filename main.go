@@ -23,7 +23,6 @@ type JobOpportunity struct {
 	Location string `json:"location"`
 }
 
-// 根據截圖 100% 精準對齊 C-B0024-001 結構
 type CwaObsResponse struct {
 	Success bool `json:"success"`
 	Records struct {
@@ -62,11 +61,18 @@ func initDB() {
 func fetchRealSeaConditions() ([]gin.H, error) {
 	url := fmt.Sprintf("https://opendata.cwa.gov.tw/api/v1/rest/datastore/C-B0024-001?Authorization=%s", CWA_API_KEY)
 
-	// 1. 將 Timeout 稍微放寬至 10 秒
-	client := http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	// 1. 建立 Request 並模擬瀏覽器 User-Agent 防止被氣象署擋請求
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Printf("❌ CWA API 連線失敗: %v", err)
+		log.Printf("❌ 建立 Request 失敗: %v", err)
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+	client := http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("❌ CWA API HTTP 請求失敗: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -75,6 +81,11 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 	if err != nil {
 		log.Printf("❌ 讀取 Response Body 失敗: %v", err)
 		return nil, err
+	}
+
+	if resp.StatusCode != 200 {
+		log.Printf("❌ 氣象署 API 回傳非 200 狀態碼: %d, 內容: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("CWA API returned status: %d", resp.StatusCode)
 	}
 
 	var cwaRes CwaObsResponse
@@ -113,14 +124,7 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 			})
 		}
 	} else {
-		log.Println("⚠️ 無氣象資料，回傳備援資料")
-		results = append(results, gin.H{
-			"location_name":  "基隆八斗子",
-			"wave_height_m":  "1.2",
-			"wind_speed_kts": "14",
-			"tide_info":      "乾潮 14:20 / 滿潮 20:45",
-			"updated_at":     time.Now().Format("2006-01-02 15:04"),
-		})
+		return nil, fmt.Errorf("locations list is empty")
 	}
 
 	return results, nil
@@ -132,6 +136,9 @@ func setupRouter() *gin.Engine {
 	r.GET("/api/v1/sea-conditions", func(c *gin.Context) {
 		seaData, err := fetchRealSeaConditions()
 		if err != nil {
+			// 在 Terminal/Render Console 印出真正的錯誤資訊，方便 debug
+			log.Printf("⚠️ 觸發降級備援模式，原因: %v", err)
+
 			c.JSON(http.StatusOK, gin.H{
 				"status": "success",
 				"data": []gin.H{
