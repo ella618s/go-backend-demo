@@ -61,7 +61,6 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 		return nil, err
 	}
 
-	// 使用 dynamic map 解析，避免強型態 Struct 失敗
 	var rawData map[string]interface{}
 	if err := json.Unmarshal(body, &rawData); err != nil {
 		log.Printf("❌ Dynamic JSON 解析失敗: %v", err)
@@ -70,7 +69,6 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 
 	var results []gin.H
 
-	// 層級拆解：records -> location
 	records, ok := rawData["records"].(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("records field not found or invalid")
@@ -81,18 +79,13 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 		return nil, fmt.Errorf("location list not found or invalid")
 	}
 
-	limit := 20
-	if len(locations) < limit {
-		limit = len(locations)
-	}
-
-	for i := 0; i < limit; i++ {
+	// 移除限制，直接處理所有測站
+	for i := 0; i < len(locations); i++ {
 		locMap, ok := locations[i].(map[string]interface{})
 		if !ok {
 			continue
 		}
 
-		// 安全取得 StationName 與 StationID
 		stationName := "未知測站"
 		stationID := "N/A"
 		if station, ok := locMap["station"].(map[string]interface{}); ok {
@@ -104,7 +97,6 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 			}
 		}
 
-		// 安全取得 WindSpeed
 		windSpeed := "1.2"
 		if obsTimesMap, ok := locMap["stationObsTimes"].(map[string]interface{}); ok {
 			if obsTimeList, ok := obsTimesMap["stationObsTime"].([]interface{}); ok && len(obsTimeList) > 0 {
