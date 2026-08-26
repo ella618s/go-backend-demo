@@ -83,7 +83,7 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 	locations := cwaRes.Records.Location
 
 	if len(locations) > 0 {
-		limit := 5
+		limit := 20
 		if len(locations) < limit {
 			limit = len(locations)
 		}
