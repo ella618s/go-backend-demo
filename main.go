@@ -149,6 +149,39 @@ func setupRouter() *gin.Engine {
 		c.JSON(http.StatusCreated, gin.H{"status": "success", "data": newJob})
 	})
 
+	// Go (Gin 框架範例)
+r.GET("/api/v1/sea-conditions", func(c *gin.Context) {
+    c.JSON(200, gin.H{
+        "status": "success",
+        "data": []gin.H{
+            {
+                "location_name": "基隆八斗子",
+                "wave_height_m": "1.2",
+                "wind_speed_kts": "14",
+                "tide_info": "乾潮 14:20 / 滿潮 20:45",
+                "updated_at": "2026-08-26 22:00",
+            },
+        },
+    })
+})
+
+r.GET("/api/v1/community-spots", func(c *gin.Context) {
+    c.JSON(200, gin.H{
+        "status": "success",
+        "data": []gin.H{
+            {
+                "id": 1,
+                "name": "野柳沉船點",
+                "latitude": 25.205,
+                "longitude": 121.690,
+                "fish_type": "紅甘 / 軟絲",
+                "depth_meters": 28.5,
+                "created_by": "Captain_Jack",
+            },
+        },
+    })
+})
+
 	return r
 }
 
