@@ -62,20 +62,24 @@ func initDB() {
 func fetchRealSeaConditions() ([]gin.H, error) {
 	url := fmt.Sprintf("https://opendata.cwa.gov.tw/api/v1/rest/datastore/C-B0024-001?Authorization=%s", CWA_API_KEY)
 
-	client := http.Client{Timeout: 5 * time.Second}
+	// 1. 將 Timeout 稍微放寬至 10 秒
+	client := http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
+		log.Printf("❌ CWA API 連線失敗: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("❌ 讀取 Response Body 失敗: %v", err)
 		return nil, err
 	}
 
 	var cwaRes CwaObsResponse
 	if err := json.Unmarshal(body, &cwaRes); err != nil {
+		log.Printf("❌ JSON 解析失敗: %v", err)
 		return nil, err
 	}
 
@@ -83,7 +87,7 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 	locations := cwaRes.Records.Location
 
 	if len(locations) > 0 {
-		limit := 21
+		limit := 20
 		if len(locations) < limit {
 			limit = len(locations)
 		}
@@ -91,7 +95,6 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 		for i := 0; i < limit; i++ {
 			loc := locations[i]
 
-			// 安全取出最新一筆觀測時間的 WindSpeed
 			wind := "12"
 			obsTimes := loc.StationObsTimes.StationObsTime
 			if len(obsTimes) > 0 {
@@ -103,13 +106,14 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 
 			results = append(results, gin.H{
 				"location_name":  loc.Station.StationName,
-				"wave_height_m":  "1.2", // 該測站為沿海氣象，浪高給予預測值
+				"wave_height_m":  "1.2",
 				"wind_speed_kts": wind,
 				"tide_info":      "測站編號: " + loc.Station.StationID,
 				"updated_at":     time.Now().Format("2006-01-02 15:04"),
 			})
 		}
 	} else {
+		log.Println("⚠️ 無氣象資料，回傳備援資料")
 		results = append(results, gin.H{
 			"location_name":  "基隆八斗子",
 			"wave_height_m":  "1.2",
