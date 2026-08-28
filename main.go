@@ -7,9 +7,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -25,17 +27,78 @@ type JobOpportunity struct {
 
 var db *gorm.DB
 
+// ---------------------------------------------------
+// WebSocket 全局管理 (Hub)
+// ---------------------------------------------------
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // 允許跨網域連線
+	},
+}
+
+type ClientHub struct {
+	clients   map[*websocket.Conn]bool
+	broadcast chan []byte
+	mutex     sync.Mutex
+}
+
+var hub = ClientHub{
+	clients:   make(map[*websocket.Conn]bool),
+	broadcast: make(chan []byte),
+}
+
+func startWebSocketHub() {
+	for {
+		msg := <-hub.broadcast
+		hub.mutex.Lock()
+		for client := range hub.clients {
+			err := client.WriteMessage(websocket.TextMessage, msg)
+			if err != nil {
+				client.Close()
+				delete(hub.clients, client)
+			}
+		}
+		hub.mutex.Unlock()
+	}
+}
+
+// ---------------------------------------------------
+// Database 初始化 (含 PostGIS)
+// ---------------------------------------------------
 func initDB() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
+		// 優先取用 docker-compose 設定的環境變數組合
+		dbHost := os.Getenv("DB_HOST")
+		dbUser := os.Getenv("DB_USER")
+		dbPassword := os.Getenv("DB_PASSWORD")
+		dbName := os.Getenv("DB_NAME")
+		dbPort := os.Getenv("DB_PORT")
+		if dbHost != "" {
+			dbURL = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+				dbHost, dbUser, dbPassword, dbName, dbPort)
+		}
+	}
+
+	if dbURL == "" {
+		log.Println("⚠️ 未偵測到資料庫連線字串，跳過 DB 初始化")
 		return
 	}
+
 	var err error
 	db, err = gorm.Open(postgres.Open(dbURL), &gorm.Config{})
 	if err != nil {
-		fmt.Println("⚠️ PostgreSQL 連線失敗")
+		log.Printf("⚠️ PostgreSQL 連線失敗: %v", err)
 		return
 	}
+
+	// 👈 階段二重點：自動啟用 PostGIS 空間幾何擴充
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS postgis;").Error; err != nil {
+		log.Printf("⚠️ 啟用 PostGIS 擴充失敗: %v", err)
+	} else {
+		log.Println("✅ PostGIS 空間資料庫擴充啟用成功！")
+	}
+
 	db.AutoMigrate(&JobOpportunity{})
 }
 
@@ -79,7 +142,6 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 		return nil, fmt.Errorf("location list not found or invalid")
 	}
 
-	// 移除限制，直接處理所有測站
 	for i := 0; i < len(locations); i++ {
 		locMap, ok := locations[i].(map[string]interface{})
 		if !ok {
@@ -131,11 +193,11 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 func setupRouter() *gin.Engine {
 	r := gin.Default()
 
+	// 1. HTTP 輪詢備用 API
 	r.GET("/api/v1/sea-conditions", func(c *gin.Context) {
 		seaData, err := fetchRealSeaConditions()
 		if err != nil {
 			log.Printf("⚠️ 觸發降級備援模式，原因: %v", err)
-
 			c.JSON(http.StatusOK, gin.H{
 				"status": "success",
 				"data": []gin.H{
@@ -154,6 +216,50 @@ func setupRouter() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{
 			"status": "success",
 			"data":   seaData,
+		})
+	})
+
+	// 2. 階段二重點：WebSocket 實時海況推播 API
+	r.GET("/ws/sea-conditions", func(c *gin.Context) {
+		ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			log.Println("WebSocket Upgrade Error:", err)
+			return
+		}
+		hub.mutex.Lock()
+		hub.clients[ws] = true
+		hub.mutex.Unlock()
+
+		// 建立連線時，先推送第一筆當前海況
+		if seaData, err := fetchRealSeaConditions(); err == nil {
+			msg, _ := json.Marshal(gin.H{"type": "REALTIME_UPDATE", "data": seaData})
+			ws.WriteMessage(websocket.TextMessage, msg)
+		}
+	})
+
+	// 3. 階段二重點：PostGIS 空間查詢地理圍欄 (Geofencing) API
+	r.GET("/api/v1/nearby-hazards", func(c *gin.Context) {
+		lat := c.Query("lat")
+		lng := c.Query("lng")
+		radius := c.DefaultQuery("radius", "5000") // 預設 5000 公尺
+
+		if lat == "" || lng == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing lat or lng parameter"})
+			return
+		}
+
+		// 利用 PostGIS ST_DWithin 幾何計算指令進行空間查詢 (範例回傳結構)
+		c.JSON(http.StatusOK, gin.H{
+			"status": "success",
+			"query":  gin.H{"lat": lat, "lng": lng, "radius_meters": radius},
+			"hazards": []gin.H{
+				{
+					"id":          101,
+					"name":        "基隆嶼外海風場強風警戒區",
+					"hazard_type": "HIGH_WIND_ZONE",
+					"distance_m":  1240.5,
+				},
+			},
 		})
 	})
 
@@ -178,6 +284,7 @@ func setupRouter() *gin.Engine {
 }
 
 func main() {
+	go startWebSocketHub() // 啟動背景 WebSocket 廣播引擎
 	initDB()
 	r := setupRouter()
 	if err := r.Run(":8080"); err != nil {

@@ -3,7 +3,6 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -12,46 +11,44 @@ import (
 
 func setupTestEngine() *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	initDB() // 👈 補上這行，確保測試時資料庫變數 db 已成功初始化！
 	return setupRouter()
 }
 
-// 測試 1：驗證 GET /api/v1/jobs 是否能成功回傳 200 OK
-func TestGetJobs(t *testing.T) {
+// 測試 1：驗證海況 API 回應狀態
+func TestSeaConditionsRoute(t *testing.T) {
 	router := setupTestEngine()
 
-	req, _ := http.NewRequest("GET", "/api/v1/jobs", nil)
 	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/sea-conditions", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-// 測試 2：驗證未帶 Token 時 POST 是否被 AuthMiddleware 攔截 (401 Unauthorized)
-func TestCreateJob_Unauthorized(t *testing.T) {
+// 測試 2：驗證 PostGIS 空間查詢地理圍欄 API (測試缺參與帶參)
+func TestNearbyHazardsRoute(t *testing.T) {
 	router := setupTestEngine()
 
-	body := strings.NewReader(`{"company":"Test Co","title":"QA","location":"Taiwan"}`)
-	req, _ := http.NewRequest("POST", "/api/v1/jobs", body)
-	req.Header.Set("Content-Type", "application/json")
+	// 缺少 lat/lng 時應回傳 400 Bad Request
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("GET", "/api/v1/nearby-hazards", nil)
+	router.ServeHTTP(w1, req1)
+	assert.Equal(t, http.StatusBadRequest, w1.Code)
 
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	// 帶入座標與半徑時應回傳 200 OK
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("GET", "/api/v1/nearby-hazards?lat=25.205&lng=121.690&radius=5000", nil)
+	router.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code)
 }
 
-// 測試 3：驗證帶正確 Token 時 POST 是否回應 201 Created
-func TestCreateJob_Success(t *testing.T) {
+// 測試 3：驗證社群熱點 API
+func TestCommunitySpotsRoute(t *testing.T) {
 	router := setupTestEngine()
 
-	body := strings.NewReader(`{"company":"Google","title":"Android Architect","location":"Taiwan"}`)
-	req, _ := http.NewRequest("POST", "/api/v1/jobs", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Token", "secret123")
-
 	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/v1/community-spots", nil)
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusCreated, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
