@@ -1,8 +1,8 @@
-# 一鍵啟動 Go + PostgreSQL
+# 一鍵啟動 Go + PostgreSQL (含 PostGIS 空間擴充)
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgis/postgis:15-3.4-alpine
     container_name: demo_postgres
     environment:
       POSTGRES_USER: user

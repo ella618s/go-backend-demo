@@ -1,0 +1,50 @@
+name: Go Backend CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:15-3.4-alpine
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: jobdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: 下載專案程式碼
+      uses: actions/checkout@v4
+
+    - name: 設定 Go 環境
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.27'
+
+    - name: 下載 Go 依賴模組
+      run: go mod download
+
+    - name: 自動執行單元測試 (Run Unit Tests)
+      env:
+        DB_HOST: localhost
+        DB_USER: user
+        DB_PASSWORD: password
+        DB_NAME: jobdb
+        DB_PORT: 5432
+      run: go test -v ./...
+
+    - name: 測試 Docker 鏡像是否能正常打包 (Test Docker Build)
+      run: docker build -t demo-go-app .
