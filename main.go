@@ -194,7 +194,14 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 func setupRouter() *gin.Engine {
 	r := gin.Default()
 	// 允許所有來源（包含 Wasm 網頁 localhost）跨域存取 API
-	r.Use(cors.Default())
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"*"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	// 1. HTTP 輪詢備用 API
 	r.GET("/api/v1/sea-conditions", func(c *gin.Context) {
