@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"gorm.io/driver/postgres"
@@ -192,6 +193,8 @@ func fetchRealSeaConditions() ([]gin.H, error) {
 
 func setupRouter() *gin.Engine {
 	r := gin.Default()
+	// 允許所有來源（包含 Wasm 網頁 localhost）跨域存取 API
+	r.Use(cors.Default())
 
 	// 1. HTTP 輪詢備用 API
 	r.GET("/api/v1/sea-conditions", func(c *gin.Context) {
